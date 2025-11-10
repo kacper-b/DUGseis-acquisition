@@ -17,34 +17,30 @@ import logging
 import copy
 
 from obspy.core import UTCDateTime
-
 from dug_seis.acquisition.one_card import Card
 from dug_seis.acquisition.star_hub import StarHub
 from dug_seis.acquisition.data_to_asdf import DataToASDF
-
 from dug_seis.acquisition.hardware_mockup import SimulatedHardware
 from dug_seis.acquisition.gps_synch_check import GPSTimingFactorCalculator, GPSyncError
-
 import dug_seis.acquisition.streaming as streaming
-from datetime import timezone
 
 logger = logging.getLogger('dug-seis')
 
 def update_timing_based_on_gps_sync(gps_checker, data_to_asdf, previous_gps_sync_status):
     is_gps_sync_old = not gps_checker.is_sync_recent(data_to_asdf.time_stamps.starttime_UTCDateTime().datetime.replace(tzinfo=None))
 
-    if is_gps_sync_old:
-        logger.info("GPS sync is too old!")
+    if is_gps_sync_old and not previous_gps_sync_status:
+        logger.debug("GPS sync is too old!")
+    elif is_gps_sync_old and previous_gps_sync_status:
+        logger.warning("GPS sync is lost!")
     elif not is_gps_sync_old and previous_gps_sync_status:
-        logger.info("GPS sync is OK!")
+        logger.debug("GPS sync is OK!")
     elif not is_gps_sync_old and not previous_gps_sync_status:
         logger.info("GPS sync is back to normal, restarting timing...")
         old = data_to_asdf.time_stamps.starttime_UTCDateTime()
         data_to_asdf.set_starttime_now()
         new = data_to_asdf.time_stamps.starttime_UTCDateTime()
-
         logger.info(f"GPS sync is back to normal, timming corrected by: {new-old} sec")
-
     return not is_gps_sync_old
 
 def run(param):
@@ -54,7 +50,7 @@ def run(param):
     bytes_per_transfer = param['Acquisition']['bytes_per_transfer']
     bytes_per_stream_packet = param['Acquisition']['bytes_per_stream_packet']
     simulation_mode = param['Acquisition']['simulation_mode']
-
+    check_GPS_sync = param['Acquisition']['check_GPS_sync']
     # make classes
     card1 = Card(param, 0)
     card2 = Card(param, 1)
@@ -82,8 +78,13 @@ def run(param):
     # while True:
     #    logger.info("xio l_data, card1: {0:b}, card2: {1:b}".format(card1.read_xio(), card2.read_xio()))
     #    time.sleep(0.1)
+    if check_GPS_sync:
+        gps_checker = GPSTimingFactorCalculator(param['Acquisition']['gps_sync_file'], logger=logger, acceptable_delay_sec=600)
+        logger.info("GPS sync checking enabled.")
+    else:
+        gps_checker = None
+        logger.info("GPS sync checking disabled.")
 
-    gps_checker = GPSTimingFactorCalculator(param['Acquisition']['gps_sync_file'], logger=logger, acceptable_delay_sec=600)
     star_hub.start()
     data_to_asdf = DataToASDF(param)
     if data_to_asdf.error:
@@ -142,12 +143,13 @@ def run(param):
 
             cards_data = [card1.read_data(bytes_per_stream_packet, bytes_streamed),
                                 card2.read_data(bytes_per_stream_packet, bytes_streamed)]
-            try:
-                timing_quality = gps_checker.get_timing_quality(stream_ts.starttime_UTCDateTime().datetime.replace(tzinfo=None), refresh_file=False)
-            except GPSyncError as e:
-                logger.error(f"Error while checking GPS sync: {e}")
-                timing_quality = 0
-            logger.debug(f"Timing quality: {timing_quality}")
+            timing_quality = 0
+            if check_GPS_sync:
+                try:
+                    timing_quality = gps_checker.get_timing_quality(stream_ts.starttime_UTCDateTime().datetime.replace(tzinfo=None), refresh_file=False)
+                except GPSyncError as e:
+                    logger.error(f"Error while checking GPS sync: {e}")
+                logger.debug(f"Timing quality: {timing_quality}")
             streaming.feed_servers(param, servers, cards_data, stream_ts.starttime_UTCDateTime(), timing_quality)
             stream_ts.set_starttime_next_segment( int(cards_data[0].size / 16) )
             bytes_streamed += bytes_per_stream_packet
@@ -200,11 +202,12 @@ def run(param):
     try:
         previous_gps_sync_status = False
         while True:
-            try:
-                gps_checker.set_GPS_sync_time()
-                previous_gps_sync_status = update_timing_based_on_gps_sync(gps_checker, data_to_asdf, previous_gps_sync_status)
-            except Exception as e:
-                logger.error(f"Error while checking GPS sync: {e}")
+            if check_GPS_sync:
+                try:
+                    gps_checker.set_GPS_sync_time()
+                    previous_gps_sync_status = update_timing_based_on_gps_sync(gps_checker, data_to_asdf, previous_gps_sync_status)
+                except Exception as e:
+                    logger.error(f"Error while checking GPS sync: {e}")
             stream_data()
 
     except KeyboardInterrupt:
