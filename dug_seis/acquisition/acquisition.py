@@ -50,8 +50,6 @@ def acquisition_(param):
     param['Acquisition']['simulation_amount'] = 0
     param['Acquisition']['asdf_settings']['reorder_channels'] = [1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, 8, 16,
                                                17, 25, 18, 26, 19, 27, 20, 28, 21, 29, 22, 30, 23, 31, 24, 32]
-    param['Acquisition']['check_GPS_sync'] = True
-    param['Acquisition']['gps_sync_file'] = 'GPS_full_output.txt'
     _check_if_hardware_needs_to_be_simulated(param)
 
     hostname = socket.gethostname()
