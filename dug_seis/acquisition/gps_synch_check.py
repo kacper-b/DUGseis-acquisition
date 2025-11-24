@@ -18,7 +18,7 @@ class GPSTimingFactorCalculator:
                 t = f.read()
                 self.logger.debug(f"Read GPS sync file content: {t}")
         except FileNotFoundError as e:
-            raise GPSyncError("GPS sync file not found.") from e
+            raise GPSyncError(f"GPS sync file {self.file_name} not found.") from e
         regex = r".*(?:Last sync:\s+\w+,\s+|^)(20\d\d-\d\d-\d\d\s+\d\d\:\d\d\:[\.\d]+).*\s*\w*\s+\(UTC([\+\-]\d)h\)"
         match = re.match(regex, t, re.DOTALL)
         if not match: 
